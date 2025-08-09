@@ -1,0 +1,480 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>JWK Tracker</title>
+  <style>
+    body{margin:0;background:#f6f7fb;color:#0f172a;font-family:system-ui,-apple-system,Segoe UI,Roboto,"Noto Sans JP",sans-serif}
+  </style>
+  <!-- React & ReactDOM（CDN）と Babel（JSX変換用） -->
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+</head>
+<body>
+  <div id="root"></div>
+
+  <!-- あなたのコード（import/export を外した版） -->
+  <script type="text/babel" data-presets="react">
+    // Reactのフックをグローバルから取り出す
+    const { useMemo, useState } = React;
+
+    const SUBJECTS = [
+      { key: "英語", color: "#ef4444" },
+      { key: "世界史", color: "#10b981" },
+      { key: "国語", color: "#f59e0b" }
+    ];
+    const UNIVERSITIES = ["慶應義塾大学", "早稲田大学"];
+    const FACULTIES = [
+      { key: "文学部", label: "文学部", color: "#fecaca", edge: "#ef4444" },
+      { key: "教育学部", label: "教育学部", color: "#bbf7d0", edge: "#10b981" },
+      { key: "社会科学部", label: "社会科学部", color: "#bfdbfe", edge: "#3b82f6" },
+      { key: "人間科学部", label: "人間科学部", color: "#fed7aa", edge: "#f59e0b" },
+      { key: "法学部", label: "法学部", color: "#e9d5ff", edge: "#8b5cf6" }
+    ];
+    const FAC_BY_KEY = FACULTIES.reduce((a, f) => { a[f.key] = f; return a; }, {});
+
+    // export default を外して App という名前に変更
+    function App() {
+      const [dataset, setDataset] = useState("CT");
+      const [ctRows, setCtRows] = useState([]);
+      const [pastRows, setPastRows] = useState([]);
+      const [uni, setUni] = useState("慶應義塾大学");
+      const [date, setDate] = useState("");
+      const [subject, setSubject] = useState("英語");
+      const [points, setPoints] = useState("");
+      const [hensachi, setHensachi] = useState("");
+      const [score, setScore] = useState("");
+      const [university, setUniversity] = useState("慶應義塾大学");
+      const [faculty, setFaculty] = useState("文学部");
+      const [detail, setDetail] = useState(null);
+      const [page, setPage] = useState(0);
+
+      const currentRows = useMemo(() => {
+        if (dataset === "CT") return ctRows;
+        return pastRows.filter(r => r.university === uni);
+      }, [dataset, ctRows, pastRows, uni]);
+
+      function addRow() {
+        if (!date || points === "") { alert("日付とポイントは必須です"); return; }
+        const p = Number(points);
+        const h = hensachi === "" ? NaN : Number(hensachi);
+        const sc = score === "" ? NaN : Number(score);
+        if (!Number.isFinite(p)) { alert("ポイントは数値で入力してください"); return; }
+
+        const id = Date.now().toString(36) + "_" + Math.random().toString(36).slice(2,8);
+
+        if (dataset === "CT") {
+          setCtRows(prev => {
+            const updated = prev.map(r => r.date === date ? { ...r, points: p } : r);
+            return updated.concat([{ id, date, subject, points: p, hensachi: h, score: sc }]);
+          });
+        } else {
+          setPastRows(prev => {
+            const updated = prev.map(r => r.date === date ? { ...r, points: p } : r);
+            return updated.concat([{ id, date, subject, points: p, hensachi: h, score: sc, university, faculty }]);
+          });
+        }
+
+        setDate(""); setSubject("英語"); setPoints(""); setHensachi(""); setScore("");
+      }
+
+      const sorted = useMemo(() => currentRows.slice().sort((a,b)=> new Date(a.date)-new Date(b.date)), [currentRows]);
+
+      function deleteRow(index){
+        const t = sorted[index]; if (!t) return;
+        if (dataset === "CT") setCtRows(prev => prev.filter(r => r.id !== t.id));
+        else setPastRows(prev => prev.filter(r => r.id !== t.id));
+      }
+
+      function latestBy(dateStr, subj){
+        const pool = dataset === "CT" ? ctRows : pastRows.filter(r => r.university===uni);
+        let found = null;
+        for (let i=0;i<pool.length;i++){
+          const r = pool[i];
+          if (r.date===dateStr && r.subject===subj) found = r;
+        }
+        return found;
+      }
+
+      const chartData = useMemo(() => {
+        const map = {};
+        for (let i=0;i<sorted.length;i++){
+          const r = sorted[i];
+          if (!r || !r.date) continue;
+          if (!map[r.date]) map[r.date] = { date:r.date, points_day:undefined, sum:{英語:0,世界史:0,国語:0}, cnt:{英語:0,世界史:0,国語:0}, tipFaculty:null };
+          const o = map[r.date];
+          if (Number.isFinite(Number(r.points))) o.points_day = Number(r.points);
+          if (Number.isFinite(Number(r.hensachi))) { o.sum[r.subject]+=Number(r.hensachi); o.cnt[r.subject]+=1; }
+          if (r.faculty) o.tipFaculty = r.faculty;
+        }
+        const arr = Object.keys(map).map(k=>({
+          date: map[k].date,
+          points_day: (map[k].points_day||0),
+          H_英語: map[k].cnt.英語? map[k].sum.英語/map[k].cnt.英語:undefined,
+          H_世界史: map[k].cnt.世界史? map[k].sum.世界史/map[k].cnt.世界史:undefined,
+          H_国語: map[k].cnt.国語? map[k].sum.国語/map[k].cnt.国語:undefined,
+          tipFaculty: map[k].tipFaculty||null
+        }));
+        return arr.sort((a,b)=> new Date(a.date)-new Date(b.date));
+      }, [sorted]);
+
+      const pageSize = 7;
+      const totalPages = Math.max(1, Math.ceil(chartData.length / pageSize));
+      const safePage = Math.min(page, totalPages - 1);
+      const pageRows = useMemo(() => {
+        const start = safePage * pageSize;
+        return chartData.slice(start, start + pageSize);
+      }, [chartData, safePage]);
+
+      function handleSelect(payload){
+        if (!payload) { setDetail(null); return; }
+        const subjSummaries = SUBJECTS.map(s => {
+          const r = latestBy(payload.date, s.key);
+          return { key: s.key, color: s.color, hensachi: r && Number.isFinite(r.hensachi)? r.hensachi : null, score: r && Number.isFinite(r.score)? r.score : null };
+        });
+        setDetail({
+          date: payload.date,
+          label: dataset==="CT"?"共通テスト":uni,
+          points: payload.points,
+          faculty: payload.faculty || null,
+          subjects: subjSummaries
+        });
+      }
+
+      return (
+        <div style={S.app}>
+          <header style={S.header}>
+            <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+              <div style={S.brandDot} />
+              <div>
+                <div style={S.appTitle}>JWK Tracker</div>
+                <div style={S.appSub}>学習 → 結果（偏差値・得点率）</div>
+              </div>
+            </div>
+            <div style={S.segmentWrap}>
+              <button onClick={()=>{setDataset("CT"); setDetail(null);}} style={{...S.segmentBtn, ...(dataset==="CT"?S.segmentOn:{})}}>共通テスト</button>
+              <button onClick={()=>{setDataset("PAST"); setDetail(null);}} style={{...S.segmentBtn, ...(dataset==="PAST"?S.segmentOn:{})}}>大学過去問</button>
+            </div>
+          </header>
+
+          <section style={S.card}>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8 }}>
+              <h2 style={S.h2}><span style={{display:"inline-block",width:6,height:18,background:"#2563eb",borderRadius:4,marginRight:8}}/>入力</h2>
+            </div>
+            <div style={S.formGrid}>
+              <div>
+                <label style={S.label}>日付*</label>
+                <input type="date" value={date} onChange={e=>setDate(e.target.value)} style={S.inputXL} />
+              </div>
+              {dataset==="PAST" && (
+                <>
+                  <div>
+                    <label style={S.label}>大学</label>
+                    <select value={university} onChange={e=>setUniversity(e.target.value)} style={S.inputXL}>
+                      {UNIVERSITIES.map(u=> <option key={u} value={u}>{u}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label style={S.label}>学部</label>
+                    <select value={faculty} onChange={e=>setFaculty(e.target.value)} style={S.inputXL}>
+                      {FACULTIES.map(f=> <option key={f.key} value={f.key}>{f.label}</option>)}
+                    </select>
+                  </div>
+                </>
+              )}
+              <div>
+                <label style={S.label}>科目</label>
+                <select value={subject} onChange={e=>setSubject(e.target.value)} style={S.inputXL}>
+                  {SUBJECTS.map(s=> <option key={s.key} value={s.key}>{s.key}</option>)}
+                </select>
+              </div>
+              <div>
+                <label style={S.label}>ポイント*</label>
+                <input type="number" value={points} onChange={e=>setPoints(e.target.value)} style={S.inputXL} placeholder="例: 120" />
+              </div>
+              <div>
+                <label style={S.label}>偏差値</label>
+                <input type="number" value={hensachi} onChange={e=>setHensachi(e.target.value)} style={S.inputXL} placeholder="例: 62" />
+              </div>
+              <div>
+                <label style={S.label}>得点</label>
+                <input type="number" value={score} onChange={e=>setScore(e.target.value)} style={S.inputXL} placeholder="例: 82" />
+              </div>
+              <div style={{ alignSelf:"end" }}>
+                <button onClick={addRow} style={S.primaryBtnXL}>追加</button>
+              </div>
+            </div>
+          </section>
+
+          {dataset==="PAST" && (
+            <section style={{...S.card,paddingTop:12}}>
+              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                <div style={{ fontWeight:700 }}>大学切替</div>
+                <div style={S.segmentWrapSmall}>
+                  {UNIVERSITIES.map(u => (
+                    <button key={u} onClick={()=>{setUni(u); setDetail(null);}} style={{...S.segmentBtnSmall, ...(uni===u?S.segmentOnSmall:{})}}>{u}</button>
+                  ))}
+                </div>
+              </div>
+            </section>
+          )}
+
+          <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", margin:"4px 0 8px" }}>
+            <div style={{ fontSize:12, color:"#64748b" }}>ページ {safePage+1} / {totalPages}</div>
+            <div style={{ display:"flex", gap:8 }}>
+              <button onClick={()=>{ setDetail(null); setPage(Math.max(0, safePage-1)); }} disabled={safePage<=0} style={{ ...S.segmentBtnSmall, opacity: safePage<=0?0.5:1, border:"1px solid #e2e8f0" }}>前へ</button>
+              <button onClick={()=>{ setDetail(null); setPage(Math.min(totalPages-1, safePage+1)); }} disabled={safePage>=totalPages-1} style={{ ...S.segmentBtnSmall, opacity: safePage>=totalPages-1?0.5:1, border:"1px solid #e2e8f0" }}>次へ</button>
+            </div>
+          </div>
+          <Chart rows={pageRows} label={dataset==="CT"?"共通テスト":uni} onSelect={handleSelect} />
+
+          <section style={{...S.card, padding:16}}>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8 }}>
+              <div style={{ fontWeight:700 }}>詳細</div>
+              <div style={{ fontSize:12, color:"#64748b" }}>日付をタップすると更新</div>
+            </div>
+            {detail ? (
+              <div style={{ display:"grid", gridTemplateColumns:"240px 1fr", gap:16 }}>
+                <div style={{ display:"grid", rowGap:8 }}>
+                  <div><div style={{fontSize:12,color:"#64748b"}}>日付</div><div>{detail.date}</div></div>
+                  <div><div style={{fontSize:12,color:"#64748b"}}>区分</div><div>{detail.label}</div></div>
+                  <div><div style={{fontSize:12,color:"#64748b"}}>ポイント</div><div>{detail.points!=null?detail.points:"-"}</div></div>
+                  {detail.label!=="共通テスト" && detail.faculty && (
+                    <div>
+                      <div style={{fontSize:12,color:"#64748b"}}>学部</div>
+                      <div style={{ display:"inline-block", padding:"6px 10px", borderRadius:8, background:FAC_BY_KEY[detail.faculty]?FAC_BY_KEY[detail.faculty].color:"#f1f5f9", border:"1px solid "+(FAC_BY_KEY[detail.faculty]?FAC_BY_KEY[detail.faculty].edge:"#e5e7eb") }}>{FAC_BY_KEY[detail.faculty]?FAC_BY_KEY[detail.faculty].label:detail.faculty}</div>
+                    </div>
+                  )}
+                </div>
+                <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit, minmax(160px,1fr))", gap:12 }}>
+                  {detail.subjects.map(s => (
+                    <div key={s.key} style={{ border:"1px solid #e5e7eb", borderRadius:12, padding:12 }}>
+                      <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:6 }}>
+                        <span style={{ width:14, height:4, background:s.color, display:"inline-block", borderRadius:2 }} />
+                        <div style={{ fontWeight:700 }}>{s.key}</div>
+                      </div>
+                      <div style={{ fontSize:12, color:"#64748b" }}>偏差値</div>
+                      <div style={{ marginBottom:8 }}>{s.hensachi!=null?s.hensachi:"-"}</div>
+                      <div style={{ fontSize:12, color:"#64748b" }}>得点</div>
+                      <div>{s.score!=null?s.score:"-"}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <div style={{ color:"#94a3b8" }}>グラフの任意の日付をタップすると、3科目の偏差値と得点をここに表示します</div>
+            )}
+          </section>
+
+          <section style={S.card}>
+            <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+              <h2 style={S.h2}>学習ログ（{dataset==="CT"?"共通テスト":uni}）</h2>
+              <div style={{ color:"#64748b", fontSize:12 }}>{sorted.length} 件</div>
+            </div>
+            <div style={S.logScroll}>
+              <table style={S.table}>
+                <thead>
+                  <tr>
+                    <th>日付</th>
+                    {dataset==="PAST" && <th>大学</th>}
+                    {dataset==="PAST" && <th>学部</th>}
+                    <th>科目</th>
+                    <th>ポイント</th>
+                    <th>偏差値</th>
+                    <th>得点</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {sorted.map((r,i)=> (
+                    <tr key={r.id || `${r.date}-${r.subject}-${i}`}>
+                      <td>{r.date}</td>
+                      {dataset==="PAST" && <td>{r.university}</td>}
+                      {dataset==="PAST" && <td>{r.faculty}</td>}
+                      <td>{r.subject}</td>
+                      <td>{r.points}</td>
+                      <td>{Number.isFinite(r.hensachi)? r.hensachi: ""}</td>
+                      <td>{Number.isFinite(r.score)? r.score: ""}</td>
+                      <td style={{ textAlign:"right" }}>
+                        <button style={S.dangerLink} onClick={()=>deleteRow(i)}>削除</button>
+                      </td>
+                    </tr>
+                  ))}
+                  {!sorted.length && (
+                    <tr><td colSpan={dataset==="PAST"?8:6} style={{ color:"#94a3b8", textAlign:"center", padding:"10px 0" }}>まだ記録がありません</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </div>
+      );
+    }
+
+    function Chart({ rows, label, onSelect }){
+      rows = Array.isArray(rows)? rows : [];
+      const W = 960, H = 440;
+      const PAD = { l:64, r:80, t:24, b:52 };
+      const innerW = W - PAD.l - PAD.r;
+      const innerH = H - PAD.t - PAD.b;
+      const n = rows.length;
+      if (n === 0) {
+        return (
+          <section style={S.card}>
+            <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:8 }}>
+              <h2 style={S.h2}>二軸グラフ <span style={{ color:"#64748b", fontSize:12 }}>（{label}）</span></h2>
+            </div>
+            <div style={{ height:320, display:"grid", placeItems:"center", color:"#94a3b8" }}>データがありません</div>
+          </section>
+        );
+      }
+      const xPos = Array.from({length:n}, (_,i)=> n<=1 ? PAD.l+innerW/2 : PAD.l + (innerW*i)/(n-1));
+      const maxPts = Math.max(10, Math.max(...rows.map(d=> d && d.points_day ? d.points_day : 0)));
+      const yL = v => PAD.t + (1 - (v/80))*innerH;
+      const yR = v => PAD.t + (1 - (v/Math.max(1,maxPts)))*innerH;
+      const barW = n<=1 ? innerW*0.32 : Math.max(10, (innerW/(n-1))*0.5);
+      const labelStep = Math.max(1, Math.ceil(n / Math.max(1, Math.floor(innerW / 90))));
+      const stepX = n>1 ? innerW/(n-1) : innerW;
+
+      function linePath(key){
+        let path=""; let started=false;
+        for (let i=0;i<n;i++){
+          const row = rows[i];
+          if (!row) { started=false; continue; }
+          const v = row[key];
+          if (typeof v === "number"){
+            const x=xPos[i], y=yL(Math.max(0, Math.min(80, v)));
+            if (!started){ path+="M "+x+" "+y; started=true; }
+            else { path+=" L "+x+" "+y; }
+          } else { started=false; }
+        }
+        return path || null;
+      }
+
+      const leftTicks=[0,20,40,60,80];
+      const steps=[1,2,5,10,20,50,100,200,500,1000];
+      const t=maxPts/5||1; const rightStep=steps.find(s=>s>=t)||steps[steps.length-1];
+      const rightTicks=Array.from({length:Math.floor(maxPts/rightStep)+1}, (_,i)=> i*rightStep);
+
+      function clickToSelect(clientX, clientY, rect){
+        const px = (clientX - rect.left) / rect.width;
+        const x = PAD.l + px*innerW;
+        let i=0; if (n>1) i=Math.round((x-PAD.l)/(innerW/(n-1)));
+        i=Math.max(0, Math.min(n-1, i));
+        if (typeof onSelect === "function") onSelect({ date: rows[i].date, points: rows[i].points_day, faculty: rows[i].tipFaculty });
+      }
+      function handleSvgClick(e){ const rect=e.currentTarget.getBoundingClientRect(); clickToSelect(e.clientX, e.clientY, rect); }
+      function handleSvgTouch(e){ const rect=e.currentTarget.getBoundingClientRect(); const t2=e.touches && e.touches[0]; if (t2) clickToSelect(t2.clientX, t2.clientY, rect); }
+
+      return (
+        <section style={S.card}>
+          <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:8 }}>
+            <h2 style={S.h2}>二軸グラフ <span style={{ color:"#64748b", fontSize:12 }}>（{label}）</span></h2>
+            <div style={{ display:"flex", gap:12, alignItems:"center", color:"#475569", fontSize:12 }}>
+              <span style={{ display:"inline-flex", alignItems:"center", gap:6 }}>
+                <span style={{ width:12, height:12, background:"#60a5fa", opacity:0.35, borderRadius:2, display:"inline-block" }} />ポイント
+              </span>
+              {SUBJECTS.map(s => (
+                <span key={s.key} style={{ display:"inline-flex", alignItems:"center", gap:6 }}>
+                  <span style={{ width:16, height:3, background:s.color, display:"inline-block", borderRadius:2 }} />{s.key}
+                </span>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <svg viewBox={`0 0 ${W} ${H}`} width="100%" height="440" onClick={handleSvgClick} onTouchStart={handleSvgTouch}>
+              <defs>
+                <linearGradient id="cardGrad" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="#ffffff" />
+                  <stop offset="100%" stopColor="#fbfdff" />
+                </linearGradient>
+              </defs>
+              <rect x={0} y={0} width={W} height={H} fill="url(#cardGrad)" rx={12} />
+
+              <g stroke="#e5e7eb">
+                {leftTicks.map(t=> <line key={t} x1={PAD.l} x2={W-PAD.r} y1={yL(t)} y2={yL(t)} strokeDasharray="3 3" />)}
+              </g>
+              <g stroke="#cbd5e1">
+                <line x1={PAD.l} y1={H-PAD.b} x2={W-PAD.r} y2={H-PAD.b} />
+                <line x1={PAD.l} y1={PAD.t} x2={PAD.l} y2={H-PAD.b} />
+                <line x1={W-PAD.r} y1={PAD.t} x2={W-PAD.r} y2={H-PAD.b} />
+              </g>
+              {leftTicks.map(t=> <text key={t} x={PAD.l-10} y={yL(t)+4} textAnchor="end" fontSize="11" fill="#6b7280">{t}</text>)}
+              {rightTicks.map(t=> <text key={t} x={W-PAD.r+10} y={yR(t)+4} textAnchor="start" fontSize="11" fill="#6b7280">{t}</text>)}
+              {rows.map((d,i)=> (i%labelStep===0) ? (
+                <text key={d?.date||i} x={xPos[i]} y={H-PAD.b+16} textAnchor="middle" fontSize="11" fill="#6b7280">{d?.date||""}</text>
+              ) : null)}
+
+              <g fill="#60a5fa" fillOpacity="0.35">
+                {rows.map((d,i)=>{
+                  const x=xPos[i]-barW/2; const y=yR((d&&d.points_day)?d.points_day:0); const h=H-PAD.b-y;
+                  return <rect key={`b-${i}`} x={x} y={y} width={barW} height={Math.max(0,h)} rx={6} />;
+                })}
+              </g>
+
+              {SUBJECTS.map(s => {
+                const key = s.key==="英語"?"H_英語": s.key==="世界史"?"H_世界史":"H_国語";
+                const path = linePath(key);
+                return path ? (
+                  <g key={s.key}>
+                    <path d={path} stroke={s.color} strokeWidth={3} fill="none" />
+                    {rows.map((d,i)=> typeof (d && d[key]) === "number" ? (
+                      <g key={`pt-${s.key}-${i}`}>
+                        <circle cx={xPos[i]} cy={yL(Math.max(0, Math.min(80, d[key])))} r={4} fill={s.color} />
+                      </g>
+                    ) : null)}
+                  </g>
+                ) : null;
+              })}
+
+              <g>
+                {rows.map((d,i)=>{
+                  const xL=xPos[i]-stepX/2; const xR=xPos[i]+stepX/2;
+                  const x=Math.max(PAD.l, xL);
+                  const w=Math.max(0, Math.min(W-PAD.r, xR)-x);
+                  return (
+                    <rect key={`hit-${i}`} x={x} y={PAD.t} width={w} height={innerH} fill="rgba(0,0,0,0)" style={{ pointerEvents:"all", cursor:"pointer" }}
+                      onClick={(e)=>{ const rect=e.currentTarget.ownerSVGElement.getBoundingClientRect(); const px=(e.clientX-rect.left)/rect.width; const x=PAD.l+px*innerW; let idx=0; if(n>1) idx=Math.round((x-PAD.l)/(innerW/(n-1))); idx=Math.max(0, Math.min(n-1, idx)); if (typeof onSelect==="function") onSelect({ date: rows[idx].date, points: rows[idx].points_day, faculty: rows[idx].tipFaculty }); }}
+                      onTouchStart={(e)=>{ const rect=e.currentTarget.ownerSVGElement.getBoundingClientRect(); const t2=e.touches && e.touches[0]; if (t2) { const px=(t2.clientX-rect.left)/rect.width; const x=PAD.l+px*innerW; let idx=0; if(n>1) idx=Math.round((x-PAD.l)/(innerW/(n-1))); idx=Math.max(0, Math.min(n-1, idx)); if (typeof onSelect==="function") onSelect({ date: rows[idx].date, points: rows[idx].points_day, faculty: rows[idx].tipFaculty }); }} }
+                    />
+                  );
+                })}
+              </g>
+            </svg>
+          </div>
+        </section>
+      );
+    }
+
+    const S = {
+      app: { minHeight:"100vh", padding:18, background:"linear-gradient(180deg, #f8fafc 0%, #eef2f7 100%)", fontFamily:"system-ui, -apple-system, Segoe UI, Roboto, sans-serif", color:"#0f172a" },
+      header: { display:"flex", alignItems:"center", justifyContent:"space-between", padding:"12px 16px", borderRadius:16, background:"#ffffff", border:"1px solid #e5e7eb", boxShadow:"0 2px 10px rgba(0,0,0,0.04)", marginBottom:14 },
+      brandDot: { width:12, height:12, borderRadius:6, background:"#2563eb", boxShadow:"0 0 0 4px rgba(37,99,235,0.12)" },
+      appTitle: { fontWeight:800, letterSpacing:"0.2px" },
+      appSub: { fontSize:12, color:"#64748b" },
+      segmentWrap: { display:"inline-flex", background:"#f1f5f9", borderRadius:12, padding:4, border:"1px solid #e2e8f0" },
+      segmentBtn: { padding:"8px 12px", borderRadius:8, border:"none", background:"transparent", cursor:"pointer", color:"#475569" },
+      segmentOn: { background:"#ffffff", color:"#0f172a", boxShadow:"0 1px 4px rgba(0,0,0,0.06)" },
+      segmentWrapSmall: { display:"inline-flex", background:"#f8fafc", borderRadius:12, padding:4, border:"1px solid #e2e8f0" },
+      segmentBtnSmall: { padding:"6px 10px", borderRadius:8, border:"none", background:"transparent", cursor:"pointer", color:"#475569", fontSize:12 },
+      segmentOnSmall: { background:"#ffffff", color:"#0f172a", boxShadow:"0 1px 4px rgba(0,0,0,0.06)" },
+      card: { background:"#fff", border:"1px solid #e5e7eb", borderRadius:16, padding:16, boxShadow:"0 1px 10px rgba(0,0,0,0.05)", marginBottom:14 },
+      h2: { fontSize:16, fontWeight:700, margin:"0 0 8px", letterSpacing:"0.2px" },
+      label: { fontSize:12, color:"#334155", display:"block", marginBottom:6 },
+      inputXL: { width:"100%", height:44, padding:"10px 12px", border:"1px solid #e5e7eb", borderRadius:12, outline:"none", background:"#f8fafc" },
+      primaryBtnXL: { background:"#2563eb", color:"#fff", border:"none", padding:"12px 16px", borderRadius:12, cursor:"pointer", height:44, minWidth:120 },
+      dangerLink: { background:"#fff", border:"1px solid #ef4444", color:"#ef4444", padding:"6px 10px", borderRadius:10, cursor:"pointer" },
+      formGrid: { display:"grid", gridTemplateColumns:"repeat(auto-fit, minmax(220px, 1fr))", gap:12, alignItems:"end" },
+      table: { width:"100%", borderCollapse:"collapse", fontSize:14, border:"1px solid #e5e7eb" },
+      logScroll: { maxHeight:360, overflowY:"auto", border:"1px solid #e5e7eb", borderRadius:12 }
+    };
+
+    // ここでマウント
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>
